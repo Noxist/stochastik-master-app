@@ -5,6 +5,7 @@ import {
 import { 
   Calculator, BarChart2, TrendingUp, GitMerge, PieChart, Play, 
   RotateCcw, Sigma, Target, ArrowRight, CheckCircle2, Menu, PauseCircle, Loader2, FlaskConical, Plus, Trash2, Download, Maximize2, Microscope, Minimize2, Type
+  RotateCcw, Sigma, Menu, PauseCircle, Plus, Trash2, Download, Maximize2, Microscope, Minimize2, Type
 } from 'lucide-react';
 
 // --- MATH UTILITIES ---
@@ -30,34 +31,7 @@ const solveVennDistance = (r1: number, r2: number, targetArea: number) => {
   const minArea = Math.PI * Math.min(r1, r2) ** 2;
   if (targetArea >= minArea - 0.0001) return Math.abs(r1 - r2);
 
-  let low = Math.abs(r1 - r2);
-  let high = r1 + r2;
-  let d = (high + low) / 2;
-
-  for (let i = 0; i < 20; i++) {
-    // Clamp values for acos to [-1, 1] to avoid NaN
-    const val1 = (d*d + r1*r1 - r2*r2) / (2*d*r1);
-    const val2 = (d*d + r2*r2 - r1*r1) / (2*d*r2);
-    
-    // Safety break
-    if (Math.abs(val1) > 1 || Math.abs(val2) > 1) break;
-
-    const part1 = r1*r1 * Math.acos(val1);
-    const part2 = r2*r2 * Math.acos(val2);
-    const part3 = 0.5 * Math.sqrt(Math.max(0, (-d+r1+r2) * (d+r1-r2) * (d-r1+r2) * (d+r1+r2)));
-    
-    const currentArea = part1 + part2 - part3;
-    
-    if (isNaN(currentArea)) break; 
-    if (Math.abs(currentArea - targetArea) < 0.01) break;
-    
-    if (currentArea > targetArea) {
-       low = d; // Need less area -> increase distance
-    } else {
-       high = d; // Need more area -> decrease distance
-    }
-    d = (low + high) / 2;
-  }
+@@ -61,55 +61,128 @@ const solveVennDistance = (r1: number, r2: number, targetArea: number) => {
   return d;
 };
 
@@ -86,8 +60,85 @@ const downloadSVG = (ref: any, filename: string) => {
   if (!ref.current) return;
   const svg = ref.current.querySelector('svg');
   if (!svg) return;
+  if (!ref?.current) return;
+  const svgCandidates = Array.from(ref.current.querySelectorAll('svg')) as SVGElement[];
+  if (svgCandidates.length === 0) return;
+
+  const pickArea = (el: SVGElement) => {
+    const rect = el.getBoundingClientRect();
+    const viewBox = (el.getAttribute('viewBox') || '').split(' ').map(Number);
+    const vbArea = viewBox.length === 4 ? Math.abs(viewBox[2] * viewBox[3]) : 0;
+    const rectArea = rect.width * rect.height;
+    return Math.max(rectArea, vbArea);
+  };
+
+  const svg = svgCandidates.reduce((best, el) => (pickArea(el) > pickArea(best) ? el : best), svgCandidates[0]);
+
+  const rect = svg.getBoundingClientRect();
+  const viewBoxParts = (svg.getAttribute('viewBox') || '').split(' ').map(Number);
+  const vbWidth = viewBoxParts[2] || rect.width || 800;
+  const vbHeight = viewBoxParts[3] || rect.height || 600;
+
+  const titleText = ref.current.dataset?.exportTitle;
+  const metaLines = (ref.current.dataset?.exportMeta || '').split('\n').filter(Boolean);
+
+  const padding = 20;
+  const lineHeight = 16;
+  const headerHeight = titleText ? lineHeight + 6 : 0;
+  const metaHeight = metaLines.length ? metaLines.length * lineHeight + 6 : 0;
+  const contentYOffset = padding + headerHeight + metaHeight;
+  const totalHeight = vbHeight + contentYOffset + padding;
+  const totalWidth = vbWidth + padding * 2;
+
+  const wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  wrapper.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  wrapper.setAttribute('viewBox', `0 0 ${totalWidth} ${totalHeight}`);
+  wrapper.setAttribute('width', `${totalWidth}`);
+  wrapper.setAttribute('height', `${totalHeight}`);
+
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', '0');
+  bg.setAttribute('y', '0');
+  bg.setAttribute('width', `${totalWidth}`);
+  bg.setAttribute('height', `${totalHeight}`);
+  bg.setAttribute('fill', 'white');
+  wrapper.appendChild(bg);
+
+  if (titleText) {
+    const titleNode = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    titleNode.setAttribute('x', `${padding}`);
+    titleNode.setAttribute('y', `${padding + lineHeight}`);
+    titleNode.setAttribute('font-size', '16');
+    titleNode.setAttribute('font-weight', 'bold');
+    titleNode.setAttribute('fill', '#0f172a');
+    titleNode.textContent = titleText;
+    wrapper.appendChild(titleNode);
+  }
 
   const svgData = new XMLSerializer().serializeToString(svg);
+  if (metaLines.length) {
+    metaLines.forEach((line: string, index: number) => {
+      const metaNode = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      metaNode.setAttribute('x', `${padding}`);
+      metaNode.setAttribute('y', `${padding + headerHeight + (index + 1) * lineHeight}`);
+      metaNode.setAttribute('font-size', '12');
+      metaNode.setAttribute('fill', '#475569');
+      metaNode.textContent = line;
+      wrapper.appendChild(metaNode);
+    });
+  }
+
+  const chartGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  chartGroup.setAttribute('transform', `translate(${padding}, ${contentYOffset})`);
+  const cloned = svg.cloneNode(true) as SVGElement;
+  cloned.setAttribute('x', '0');
+  cloned.setAttribute('y', '0');
+  cloned.setAttribute('width', `${vbWidth}`);
+  cloned.setAttribute('height', `${vbHeight}`);
+  chartGroup.appendChild(cloned);
+  wrapper.appendChild(chartGroup);
+
+  const svgData = new XMLSerializer().serializeToString(wrapper);
   const blob = new Blob([svgData], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -113,16 +164,7 @@ const Card = ({ children, title, subtitle, className = "", chartRef = null, cust
             {chartRef && (
               <div className="flex gap-2">
                 <button 
-                  onClick={() => downloadSVG(chartRef, customTitle || title)} 
-                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                  title="Als SVG speichern"
-                >
-                  <Download size={18} />
-                </button>
-                <button 
-                  onClick={() => setIsFullscreen(true)} 
-                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                  title="Vollbild"
+@@ -126,56 +199,50 @@ const Card = ({ children, title, subtitle, className = "", chartRef = null, cust
                 >
                   <Maximize2 size={18} />
                 </button>
@@ -179,18 +221,7 @@ const TitleInput = ({ value, onChange }: any) => (
   <div className="mb-4 flex items-center gap-2">
     <Type size={16} className="text-slate-400" />
     <input 
-      type="text" 
-      placeholder="Diagramm-Titel (z.B. Aufgabe 1a)" 
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full p-2 border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent text-sm font-medium"
-    />
-  </div>
-);
-
-// --- MODULE 1: BINOMIAL ---
-const BinomialModule = () => {
-  const [n, setN] = useState<number | ''>(10);
+@@ -194,194 +261,229 @@ const BinomialModule = () => {
   const [p, setP] = useState<number | ''>(0.5);
   const [view, setView] = useState('pdf');
   const [customTitle, setCustomTitle] = useState("");
@@ -216,6 +247,13 @@ const BinomialModule = () => {
   const safeP = p === '' ? 0 : p;
   const mu = safeN * safeP;
   const sigma = Math.sqrt(safeN * safeP * (1 - safeP));
+  const binomExportMeta = [
+    `n = ${safeN}`,
+    `p = ${safeP.toFixed(2)}`,
+    `μ = ${mu.toFixed(2)}`,
+    `σ = ${sigma.toFixed(2)}`,
+    `Ansicht: ${view === 'pdf' ? 'P(X=k)' : 'F(x)'}`
+  ].join('\n');
 
   return (
     <div className="space-y-6">
@@ -254,6 +292,12 @@ const BinomialModule = () => {
              <button onClick={() => setView('cdf')} className={`px-3 py-1 text-xs rounded border ${view === 'cdf' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200'}`}>F(x)</button>
            </div>
            <div className="w-full h-full min-h-[300px]" ref={chartRef}>
+           <div 
+             className="w-full h-full min-h-[300px]" 
+             ref={chartRef}
+             data-export-title={customTitle || "Binomialverteilung"}
+             data-export-meta={binomExportMeta}
+           >
              {customTitle && <div className="text-center font-bold text-lg mb-2">{customTitle}</div>}
              <ResponsiveContainer width="100%" height="100%">
                {view === 'pdf' ? (
@@ -298,6 +342,13 @@ const RandomVariableModule = () => {
     return {sumP,eX, vari, sig: Math.sqrt(vari)};
   }, [rows]);
 
+  const rvExportMeta = [
+    `ΣP = ${stats.sumP.toFixed(2)}`,
+    `μ = ${stats.eX.toFixed(2)}`,
+    `σ = ${stats.sig.toFixed(2)}`,
+    `Werte: ${rows.length}`
+  ].join('\n');
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <Card title="Wertetabelle">
@@ -306,6 +357,12 @@ const RandomVariableModule = () => {
       </Card>
       <Card title={customTitle || "Verteilung"} chartRef={chartRef} customTitle={customTitle}>
         <div className="w-full h-[300px]" ref={chartRef}>
+        <div 
+          className="w-full h-[300px]" 
+          ref={chartRef}
+          data-export-title={customTitle || "Zufallsvariable"}
+          data-export-meta={rvExportMeta}
+        >
             {customTitle && <div className="text-center font-bold mb-2">{customTitle}</div>}
             <ResponsiveContainer>
                 <BarChart data={rows}>
@@ -345,6 +402,12 @@ const SimulationModule = () => {
      return history.map((val,i)=>{if(val===targetNum)count++; return {n:i+1,rel:count/(i+1)}}).filter((_,i)=>i%step===0 || i===history.length-1);
   },[history,targetNum]);
 
+  const simExportMeta = [
+    `Zielzahl: ${targetNum}`,
+    `Würfe: ${history.length}`,
+    `Aktuelle relative Häufigkeit: ${data.length ? data[data.length-1].rel.toFixed(3) : '–'}`
+  ].join('\n');
+
   return (
     <div className="space-y-6">
        <Card title="Gesetz der großen Zahlen (Würfeln)">
@@ -360,6 +423,14 @@ const SimulationModule = () => {
        </Card>
        <Card title={customTitle || "Konvergenz"} chartRef={chartRef} customTitle={customTitle}>
           <div className="w-full h-[400px]" ref={chartRef}>
+      </Card>
+      <Card title={customTitle || "Konvergenz"} chartRef={chartRef} customTitle={customTitle}>
+          <div 
+            className="w-full h-[400px]" 
+            ref={chartRef}
+            data-export-title={customTitle || "Gesetz der großen Zahlen"}
+            data-export-meta={simExportMeta}
+          >
              {customTitle && <div className="text-center font-bold mb-2">{customTitle}</div>}
              <ResponsiveContainer>
                 <LineChart data={data}>
@@ -385,58 +456,7 @@ const UrnModule = () => {
   ]);
   const [draws, setDraws] = useState(2);
   const [mode, setMode] = useState('without'); 
-  const [simResults, setSimResults] = useState<any[] | null>(null);
-  const [customTitle, setCustomTitle] = useState("");
-  const chartRef = useRef(null);
-
-  const runSimulation = () => {
-    const trials = 2000;
-    const results: Record<string, number> = {};
-    for (let i = 0; i < trials; i++) {
-      let currentBalls = balls.map(b => ({...b})); 
-      let path = [];
-      for (let d = 0; d < draws; d++) {
-        const total = currentBalls.reduce((s, b) => s + b.count, 0);
-        if (total === 0) break;
-        let r = Math.random() * total;
-        let selected = null;
-        for (let b of currentBalls) {
-          if (r < b.count) { selected = b; break; }
-          r -= b.count;
-        }
-        if (selected) {
-          path.push(selected.name);
-          if (mode === 'without') selected.count--;
-        }
-      }
-      const key = path.join('-'); 
-      results[key] = (results[key] || 0) + 1;
-    }
-    const chartData = Object.entries(results)
-      .map(([name, count]) => ({ name, count, prob: count/trials }))
-      .sort((a,b) => b.count - a.count);
-    setSimResults(chartData);
-  };
-
-  const renderTree = (depth: number, currentBalls: any[], x: number, y: number, width: number, pSoFar: number): any => {
-    if (depth === 0) {
-        // Render Result Label at leaf node
-        return (
-            <g key={`leaf-${x}-${y}`}>
-                <rect x={x-25} y={y+15} width="50" height="20" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
-                <text x={x} y={y+28} textAnchor="middle" fontSize="10" fontWeight="bold" fill="#334155">{pSoFar.toFixed(4)}</text>
-            </g>
-        );
-    }
-    
-    // Check prune condition but ensure we draw if depth is small to avoid empty screens
-    if (pSoFar < 0.001 && depth > 2) return null; 
-
-    const currentTotal = currentBalls.reduce((s, b) => s + b.count, 0);
-    if (currentTotal === 0) return null;
-    const branches: any[] = [];
-    const validBalls = currentBalls.filter(b => b.count > 0);
-    const childWidth = width / validBalls.length;
+@@ -440,83 +542,93 @@ const UrnModule = () => {
     let currentX = x - width / 2 + childWidth / 2;
 
     validBalls.forEach((ball) => {
@@ -462,6 +482,11 @@ const UrnModule = () => {
   };
 
   const useSim = draws > 4 || balls.length > 3 || Math.pow(balls.length, draws) > 64; 
+  const urnExportMeta = [
+    `Züge: ${draws}`,
+    `Modus: ${mode === 'with' ? 'mit Zurücklegen' : 'ohne Zurücklegen'}`,
+    `Farben: ${balls.map(b => `${b.name}=${b.count}`).join(', ')}`
+  ].join('\n');
 
   return (
     <div className="space-y-6">
@@ -495,6 +520,12 @@ const UrnModule = () => {
         </Card>
         <Card title={customTitle || (useSim ? "Simulation" : "Baumdiagramm")} className="xl:col-span-2 min-h-[500px]" chartRef={chartRef} customTitle={customTitle}>
            <div className="w-full h-full min-h-[500px]" ref={chartRef}>
+           <div 
+             className="w-full h-full min-h-[500px]" 
+             ref={chartRef}
+             data-export-title={customTitle || (useSim ? "Urnen-Simulation" : "Urnen-Baumdiagramm")}
+             data-export-meta={urnExportMeta}
+           >
              {customTitle && <div className="text-center font-bold mb-4">{customTitle}</div>}
              {useSim ? (
                <div className="h-full">
@@ -520,13 +551,7 @@ const UrnModule = () => {
            </div>
         </Card>
       </div>
-    </div>
-  );
-};
-
-// --- MODULE: HYPOTHESENTEST ---
-const HypothesisModule = () => {
-  const [n, setN] = useState<number | ''>(50);
+@@ -530,163 +642,199 @@ const HypothesisModule = () => {
   const [p0, setP0] = useState<number | ''>(0.4);
   const [kCrit, setKCrit] = useState(25);
   const [type, setType] = useState('right'); 
@@ -552,6 +577,13 @@ const HypothesisModule = () => {
   }, [n, p0, kCrit, type]);
 
   const alpha = data.filter(d => d.isReject).reduce((sum, d) => sum + d.prob, 0);
+  const hypoExportMeta = [
+    `n = ${n === '' ? 0 : n}`,
+    `p₀ = ${(p0 === '' ? 0 : p0).toFixed(2)}`,
+    `k kritisch = ${kCrit}`,
+    `Test: ${type === 'right' ? 'rechtsseitig' : 'linksseitig'}`,
+    `α ≈ ${(alpha*100).toFixed(2)} %`
+  ].join('\n');
 
   return (
     <div className="space-y-6">
@@ -590,6 +622,12 @@ const HypothesisModule = () => {
           </Card>
           <Card title={customTitle || "Ablehnungsbereich"} className="lg:col-span-2" chartRef={chartRef} customTitle={customTitle}>
              <div className="w-full h-[350px]" ref={chartRef}>
+             <div 
+               className="w-full h-[350px]" 
+               ref={chartRef}
+               data-export-title={customTitle || "Hypothesentest"}
+               data-export-meta={hypoExportMeta}
+             >
                 {customTitle && <div className="text-center font-bold mb-2">{customTitle}</div>}
                 <ResponsiveContainer>
                     <BarChart data={data} barCategoryGap={1}>
@@ -601,6 +639,7 @@ const HypothesisModule = () => {
                        <Bar dataKey="prob" name="Wahrscheinlichkeit" shape={(props: any) => {
                           const { x, y, width, height, payload } = props;
                           return <rect x={x} y={y} width={width} height={height} fill={payload.isReject ? "#ef4444" : "#e2e8f0"} radius={[2,2,0,0]}/>
+                          return <rect x={x} y={y} width={width} height={height} fill={payload.isReject ? "#ef4444" : "#e2e8f0"} rx={2} ry={2}/>
                        }}/>
                        <ReferenceLine x={kCrit} stroke="black" strokeDasharray="3 3" label="k"/>
                     </BarChart>
@@ -642,6 +681,18 @@ const VennModule = () => {
   const cy = 150;
   const cAx = cx - geometry.dist / 2;
   const cBx = cx + geometry.dist / 2;
+  const onlyA = Math.max(0, pA - pIntersect);
+  const onlyB = Math.max(0, pB - pIntersect);
+  const union = pA + pB - pIntersect;
+  const outside = Math.max(0, 1 - union);
+  const vennExportMeta = [
+    `P(A) = ${pA.toFixed(2)}`,
+    `P(B) = ${pB.toFixed(2)}`,
+    `P(A ∩ B) = ${pIntersect.toFixed(2)}`,
+    `P(A \\ B) = ${onlyA.toFixed(2)}`,
+    `P(B \\ A) = ${onlyB.toFixed(2)}`,
+    `P(Ω \\ (A ∪ B)) = ${outside.toFixed(2)}`
+  ].join('\n');
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
@@ -655,6 +706,12 @@ const VennModule = () => {
       </Card>
       <Card title={customTitle || "Venn-Diagramm"} chartRef={chartRef} customTitle={customTitle}>
         <div className="w-full h-[350px] flex items-center justify-center" ref={chartRef}>
+        <div 
+          className="w-full h-[350px] flex items-center justify-center" 
+          ref={chartRef}
+          data-export-title={customTitle || "Venn-Diagramm"}
+          data-export-meta={vennExportMeta}
+        >
            <svg viewBox="0 0 400 300" className="w-full h-full max-w-md mx-auto overflow-visible">
               {customTitle && <text x="200" y="20" textAnchor="middle" fontWeight="bold" fontSize="16">{customTitle}</text>}
               <rect x="0" y="0" width="400" height="300" fill="white" stroke="#e2e8f0" strokeWidth="2" rx="8"/>
@@ -665,6 +722,15 @@ const VennModule = () => {
               <use href="#cB" clipPath="url(#clipA)" fill="#475569" fillOpacity="0.3" />
               <text x={cAx} y={cy} textAnchor="middle" dy="5" fontSize="14" fontWeight="bold" fill="#1e40af" pointerEvents="none">A</text>
               <text x={cBx} y={cy} textAnchor="middle" dy="5" fontSize="14" fontWeight="bold" fill="#6b21a8" pointerEvents="none">B</text>
+              <text x={cAx} y={cy - 12} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#1e40af" pointerEvents="none">A</text>
+              <text x={cBx} y={cy - 12} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#6b21a8" pointerEvents="none">B</text>
+              <text x={cAx - geometry.radA * 0.35} y={cy + 12} textAnchor="middle" fontSize="12" fill="#1e3a8a" pointerEvents="none">{`A \\ B: ${onlyA.toFixed(2)}`}</text>
+              <text x={(cAx + cBx)/2} y={cy + 4} textAnchor="middle" fontSize="12" fontWeight="bold" fill="#0f172a" pointerEvents="none">{`A ∩ B: ${pIntersect.toFixed(2)}`}</text>
+              <text x={cBx + geometry.radB * 0.35} y={cy + 12} textAnchor="middle" fontSize="12" fill="#581c87" pointerEvents="none">{`B \\ A: ${onlyB.toFixed(2)}`}</text>
+              <text x="20" y="40" fontSize="12" fill="#334155" pointerEvents="none">P(A) = {pA.toFixed(2)}</text>
+              <text x="20" y="56" fontSize="12" fill="#334155" pointerEvents="none">P(B) = {pB.toFixed(2)}</text>
+              <text x="20" y="72" fontSize="12" fill="#334155" pointerEvents="none">P(Ω \\ (A ∪ B)) = {outside.toFixed(2)}</text>
+              <text x="380" y="262" textAnchor="end" fontSize="12" fill="#475569" pointerEvents="none">{`P(A ∪ B) = ${union.toFixed(2)}`}</text>
            </svg>
         </div>
       </Card>
@@ -690,11 +756,7 @@ const App = () => {
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {menuOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={()=>setMenuOpen(false)}/>}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 transform transition-transform duration-300 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0`}>
-         <div className="h-16 flex items-center px-6 border-b border-slate-100 font-bold text-xl text-blue-700 gap-2">
-            <Calculator className="text-blue-600"/> Stochastik<span className="font-light text-slate-400">Master</span>
-         </div>
-         <div className="p-4 space-y-1 overflow-y-auto h-[calc(100%-4rem)]">
+@@ -698,26 +846,26 @@ const App = () => {
            {tabs.map(t=>(
              <button key={t.id} onClick={()=>{setActiveTab(t.id);setMenuOpen(false)}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${activeTab===t.id?'bg-blue-50 text-blue-700 border border-blue-100':'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>
                <t.icon size={18}/> {t.title}
@@ -719,5 +781,3 @@ const App = () => {
     </div>
   );
 };
-
-export default App;
