@@ -2,10 +2,43 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ReferenceLine, ComposedChart 
 } from 'recharts';
+import type { TooltipProps } from 'recharts';
 import { 
   Calculator, BarChart2, TrendingUp, GitMerge, PieChart, Play, 
   RotateCcw, Sigma, Menu, PauseCircle, Plus, Trash2, Download, Maximize2, Microscope, Minimize2, Type
 } from 'lucide-react';
+
+// --- DISPLAY UTILITIES ---
+
+const formatNumber = (value: number) => {
+  if (!isFinite(value)) return '–';
+  const digits = Math.abs(value) >= 1 ? 2 : 4;
+  return Number(value.toFixed(digits)).toString();
+};
+
+const tooltipFormatter: TooltipProps<number, string>['formatter'] = (value, name) => [
+  typeof value === 'number' ? formatNumber(value) : value,
+  name ?? ''
+];
+
+const tooltipLabelFormatter: TooltipProps<number, string>['labelFormatter'] = (label) =>
+  typeof label === 'number' ? formatNumber(label) : label ?? '';
+
+const tooltipConfig: Partial<TooltipProps<number, string>> = {
+  formatter: tooltipFormatter,
+  labelFormatter: tooltipLabelFormatter,
+  contentStyle: {
+    background: '#ffffff',
+    borderRadius: 12,
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 14px 36px rgba(15, 23, 42, 0.14)',
+    padding: '10px 12px',
+  },
+  itemStyle: { color: '#0f172a', padding: 2 },
+  labelStyle: { color: '#475569', fontWeight: 600 },
+  cursor: { fill: 'rgba(37, 99, 235, 0.08)' },
+  wrapperStyle: { outline: 'none' }
+};
 
 // --- MATH UTILITIES ---
 
@@ -340,7 +373,7 @@ const BinomialModule = () => {
                    <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                    <XAxis dataKey="k"/>
                    <YAxis/>
-                   <RechartsTooltip/>
+                   <RechartsTooltip {...tooltipConfig}/>
                    <Bar dataKey="prob" fill="#3b82f6" radius={[4,4,0,0]} name="Wahrscheinlichkeit"/>
                  </BarChart>
                ) : (
@@ -348,7 +381,7 @@ const BinomialModule = () => {
                    <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                    <XAxis dataKey="k"/>
                    <YAxis domain={[0,1]}/>
-                   <RechartsTooltip/>
+                   <RechartsTooltip {...tooltipConfig}/>
                    <Line type="stepAfter" dataKey="cum" stroke="#3b82f6" strokeWidth={2} dot={{r:1}} name="Kumulierte Wsk."/>
                  </ComposedChart>
                )}
@@ -403,7 +436,7 @@ const RandomVariableModule = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                     <XAxis dataKey="x"/>
                     <YAxis hide/>
-                    <RechartsTooltip/>
+                    <RechartsTooltip {...tooltipConfig}/>
                     <Bar dataKey="p" fill="#8b5cf6" radius={[4,4,0,0]} name="P(X=x)"/>
                     <ReferenceLine x={stats.eX} stroke="#7c3aed" strokeWidth={2} label="μ"/>
                 </BarChart>
@@ -436,10 +469,22 @@ const SimulationModule = () => {
      return history.map((val,i)=>{if(val===targetNum)count++; return {n:i+1,rel:count/(i+1)}}).filter((_,i)=>i%step===0 || i===history.length-1);
   },[history,targetNum]);
 
+  const stats = useMemo(() => {
+    if (!history.length) return { mean: 0, median: 0, rel: 0 };
+    const sorted = [...history].sort((a,b)=>a-b);
+    const mid = Math.floor(sorted.length/2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+    const mean = history.reduce((s,v)=>s+v,0) / history.length;
+    const rel = data.length ? data[data.length-1].rel : 0;
+    return { mean, median, rel };
+  }, [history, data]);
+
   const simExportMeta = [
     `Zielzahl: ${targetNum}`,
     `Würfe: ${history.length}`,
-    `Aktuelle relative Häufigkeit: ${data.length ? data[data.length-1].rel.toFixed(3) : '–'}`
+    `Aktuelle relative Häufigkeit: ${data.length ? data[data.length-1].rel.toFixed(3) : '–'}`,
+    `Mittelwert: ${history.length ? stats.mean.toFixed(2) : '–'}`,
+    `Median: ${history.length ? stats.median.toFixed(2) : '–'}`
   ].join('\n');
 
   return (
@@ -457,22 +502,28 @@ const SimulationModule = () => {
       </Card>
       <Card title={customTitle || "Konvergenz"} chartRef={chartRef} customTitle={customTitle}>
           <div 
-            className="w-full h-[400px]" 
+            className="w-full h-[400px] relative" 
             ref={chartRef}
             data-export-title={customTitle || "Gesetz der großen Zahlen"}
             data-export-meta={simExportMeta}
           >
              {customTitle && <div className="text-center font-bold mb-2">{customTitle}</div>}
+             <div className="absolute top-4 right-4 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-700 space-y-1">
+                <div className="font-bold text-slate-900">Live-Statistik</div>
+                <div className="flex justify-between gap-4"><span>Mittelwert</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.mean) : '–'}</span></div>
+                <div className="flex justify-between gap-4"><span>Median</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.median) : '–'}</span></div>
+                <div className="flex justify-between gap-4"><span>Rel. Häufigkeit ({targetNum})</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.rel) : '–'}</span></div>
+              </div>
              <ResponsiveContainer>
                 <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3"/>
                     <XAxis dataKey="n"/>
                     <YAxis domain={[0,0.5]}/>
-                    <RechartsTooltip/>
-                    <Line dot={false} dataKey="rel" stroke="#2563eb" strokeWidth={2} name={`Rel. Häufigkeit (${targetNum})`}/>
+                    <RechartsTooltip {...tooltipConfig}/>
+                    <Line dot={false} isAnimationActive={false} dataKey="rel" stroke="#2563eb" strokeWidth={2} name={`Rel. Häufigkeit (${targetNum})`}/>
                     <ReferenceLine y={1/6} stroke="green" strokeDasharray="5 5" label="1/6"/>
                 </LineChart>
-             </ResponsiveContainer>
+            </ResponsiveContainer>
           </div>
        </Card>
     </div>
@@ -612,7 +663,7 @@ const UrnModule = () => {
                <div className="h-full">
                  {simResults ? (
                    <ResponsiveContainer width="100%" height="100%">
-                     <BarChart data={simResults} layout="vertical" margin={{left:50, right:20}}><CartesianGrid strokeDasharray="3 3" horizontal/><XAxis type="number"/><YAxis dataKey="name" type="category" width={100} tick={{fontSize:11}}/><RechartsTooltip/><Bar dataKey="prob" fill="#3b82f6" radius={[0,4,4,0]} name="Rel. Häufigkeit"/></BarChart>
+                     <BarChart data={simResults} layout="vertical" margin={{left:50, right:20}}><CartesianGrid strokeDasharray="3 3" horizontal/><XAxis type="number"/><YAxis dataKey="name" type="category" width={100} tick={{fontSize:11}}/><RechartsTooltip {...tooltipConfig}/><Bar dataKey="prob" fill="#3b82f6" radius={[0,4,4,0]} name="Rel. Häufigkeit"/></BarChart>
                    </ResponsiveContainer>
                  ) : <div className="flex items-center justify-center h-full text-slate-400">Bitte Simulation starten</div>}
                </div>
@@ -720,7 +771,7 @@ const HypothesisModule = () => {
                        <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                        <XAxis dataKey="k"/>
                        <YAxis hide/>
-                       <RechartsTooltip/>
+                       <RechartsTooltip {...tooltipConfig}/>
                        <Legend/>
                        <Bar dataKey="prob" name="Wahrscheinlichkeit" shape={(props: any) => {
                           const { x, y, width, height, payload } = props;
