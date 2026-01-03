@@ -2,11 +2,43 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, ReferenceLine, ComposedChart 
 } from 'recharts';
+import type { TooltipProps } from 'recharts';
 import { 
   Calculator, BarChart2, TrendingUp, GitMerge, PieChart, Play, 
-  RotateCcw, Sigma, Target, ArrowRight, CheckCircle2, Menu, PauseCircle, Loader2, FlaskConical, Plus, Trash2, Download, Maximize2, Microscope, Minimize2, Type
   RotateCcw, Sigma, Menu, PauseCircle, Plus, Trash2, Download, Maximize2, Microscope, Minimize2, Type
 } from 'lucide-react';
+
+// --- DISPLAY UTILITIES ---
+
+const formatNumber = (value: number) => {
+  if (!isFinite(value)) return '–';
+  const digits = Math.abs(value) >= 1 ? 2 : 4;
+  return Number(value.toFixed(digits)).toString();
+};
+
+const tooltipFormatter: TooltipProps<number, string>['formatter'] = (value, name) => [
+  typeof value === 'number' ? formatNumber(value) : value,
+  name ?? ''
+];
+
+const tooltipLabelFormatter: TooltipProps<number, string>['labelFormatter'] = (label) =>
+  typeof label === 'number' ? formatNumber(label) : label ?? '';
+
+const tooltipConfig: Partial<TooltipProps<number, string>> = {
+  formatter: tooltipFormatter,
+  labelFormatter: tooltipLabelFormatter,
+  contentStyle: {
+    background: '#ffffff',
+    borderRadius: 12,
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 14px 36px rgba(15, 23, 42, 0.14)',
+    padding: '10px 12px',
+  },
+  itemStyle: { color: '#0f172a', padding: 2 },
+  labelStyle: { color: '#475569', fontWeight: 600 },
+  cursor: { fill: 'rgba(37, 99, 235, 0.08)' },
+  wrapperStyle: { outline: 'none' }
+};
 
 // --- MATH UTILITIES ---
 
@@ -31,7 +63,34 @@ const solveVennDistance = (r1: number, r2: number, targetArea: number) => {
   const minArea = Math.PI * Math.min(r1, r2) ** 2;
   if (targetArea >= minArea - 0.0001) return Math.abs(r1 - r2);
 
-@@ -61,55 +61,128 @@ const solveVennDistance = (r1: number, r2: number, targetArea: number) => {
+  let low = Math.abs(r1 - r2);
+  let high = r1 + r2;
+  let d = (high + low) / 2;
+
+  for (let i = 0; i < 20; i++) {
+    // Clamp values for acos to [-1, 1] to avoid NaN
+    const val1 = (d*d + r1*r1 - r2*r2) / (2*d*r1);
+    const val2 = (d*d + r2*r2 - r1*r1) / (2*d*r2);
+    
+    // Safety break
+    if (Math.abs(val1) > 1 || Math.abs(val2) > 1) break;
+
+    const part1 = r1*r1 * Math.acos(val1);
+    const part2 = r2*r2 * Math.acos(val2);
+    const part3 = 0.5 * Math.sqrt(Math.max(0, (-d+r1+r2) * (d+r1-r2) * (d-r1+r2) * (d+r1+r2)));
+    
+    const currentArea = part1 + part2 - part3;
+    
+    if (isNaN(currentArea)) break; 
+    if (Math.abs(currentArea - targetArea) < 0.01) break;
+    
+    if (currentArea > targetArea) {
+       low = d; // Need less area -> increase distance
+    } else {
+       high = d; // Need more area -> decrease distance
+    }
+    d = (low + high) / 2;
+  }
   return d;
 };
 
@@ -57,9 +116,6 @@ const FullscreenModal = ({ isOpen, onClose, children, title }: any) => {
 };
 
 const downloadSVG = (ref: any, filename: string) => {
-  if (!ref.current) return;
-  const svg = ref.current.querySelector('svg');
-  if (!svg) return;
   if (!ref?.current) return;
   const svgCandidates = Array.from(ref.current.querySelectorAll('svg')) as SVGElement[];
   if (svgCandidates.length === 0) return;
@@ -115,7 +171,6 @@ const downloadSVG = (ref: any, filename: string) => {
     wrapper.appendChild(titleNode);
   }
 
-  const svgData = new XMLSerializer().serializeToString(svg);
   if (metaLines.length) {
     metaLines.forEach((line: string, index: number) => {
       const metaNode = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -164,7 +219,16 @@ const Card = ({ children, title, subtitle, className = "", chartRef = null, cust
             {chartRef && (
               <div className="flex gap-2">
                 <button 
-@@ -126,56 +199,50 @@ const Card = ({ children, title, subtitle, className = "", chartRef = null, cust
+                  onClick={() => downloadSVG(chartRef, customTitle || title)} 
+                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  title="Als SVG speichern"
+                >
+                  <Download size={18} />
+                </button>
+                <button 
+                  onClick={() => setIsFullscreen(true)} 
+                  className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  title="Vollbild"
                 >
                   <Maximize2 size={18} />
                 </button>
@@ -189,12 +253,6 @@ const Card = ({ children, title, subtitle, className = "", chartRef = null, cust
     </>
   );
 };
-
-const MathFormula = ({ tex }: {tex: string}) => (
-  <span className="font-serif italic text-slate-800 px-1 bg-slate-50 rounded border border-slate-100 text-sm mx-1 inline-block">
-    {tex}
-  </span>
-);
 
 const NumberInput = ({ value, onChange, min, max, step = 1, className = "" }: any) => {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,7 +279,18 @@ const TitleInput = ({ value, onChange }: any) => (
   <div className="mb-4 flex items-center gap-2">
     <Type size={16} className="text-slate-400" />
     <input 
-@@ -194,194 +261,229 @@ const BinomialModule = () => {
+      type="text" 
+      placeholder="Diagramm-Titel (z.B. Aufgabe 1a)" 
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full p-2 border-b border-slate-200 focus:border-blue-500 outline-none bg-transparent text-sm font-medium"
+    />
+  </div>
+);
+
+// --- MODULE 1: BINOMIAL ---
+const BinomialModule = () => {
+  const [n, setN] = useState<number | ''>(10);
   const [p, setP] = useState<number | ''>(0.5);
   const [view, setView] = useState('pdf');
   const [customTitle, setCustomTitle] = useState("");
@@ -291,7 +360,6 @@ const TitleInput = ({ value, onChange }: any) => (
              <button onClick={() => setView('pdf')} className={`px-3 py-1 text-xs rounded border ${view === 'pdf' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200'}`}>P(X=k)</button>
              <button onClick={() => setView('cdf')} className={`px-3 py-1 text-xs rounded border ${view === 'cdf' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200'}`}>F(x)</button>
            </div>
-           <div className="w-full h-full min-h-[300px]" ref={chartRef}>
            <div 
              className="w-full h-full min-h-[300px]" 
              ref={chartRef}
@@ -305,7 +373,7 @@ const TitleInput = ({ value, onChange }: any) => (
                    <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                    <XAxis dataKey="k"/>
                    <YAxis/>
-                   <RechartsTooltip/>
+                   <RechartsTooltip {...tooltipConfig}/>
                    <Bar dataKey="prob" fill="#3b82f6" radius={[4,4,0,0]} name="Wahrscheinlichkeit"/>
                  </BarChart>
                ) : (
@@ -313,7 +381,7 @@ const TitleInput = ({ value, onChange }: any) => (
                    <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                    <XAxis dataKey="k"/>
                    <YAxis domain={[0,1]}/>
-                   <RechartsTooltip/>
+                   <RechartsTooltip {...tooltipConfig}/>
                    <Line type="stepAfter" dataKey="cum" stroke="#3b82f6" strokeWidth={2} dot={{r:1}} name="Kumulierte Wsk."/>
                  </ComposedChart>
                )}
@@ -356,7 +424,6 @@ const RandomVariableModule = () => {
         <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr><th className="p-2 text-left">x</th><th className="p-2 text-left">P(X=x)</th><th></th></tr></thead><tbody>{rows.map((r,i)=>(<tr key={i}><td className="p-1"><NumberInput value={r.x} onChange={(v:any)=>{const n=[...rows];n[i].x=v;setRows(n)}} className="w-full"/></td><td className="p-1"><NumberInput value={r.p} onChange={(v:any)=>{const n=[...rows];n[i].p=v;setRows(n)}} step={0.05} className="w-full"/></td><td className="p-1"><button onClick={()=>setRows(rows.filter((_,j)=>j!==i))}><Trash2 size={16} className="text-slate-400"/></button></td></tr>))}</tbody></table></div><button onClick={()=>setRows([...rows,{x:rows.length,p:0}])} className="mt-4 flex items-center gap-2 text-sm text-blue-600 font-bold">+ Wert</button>
       </Card>
       <Card title={customTitle || "Verteilung"} chartRef={chartRef} customTitle={customTitle}>
-        <div className="w-full h-[300px]" ref={chartRef}>
         <div 
           className="w-full h-[300px]" 
           ref={chartRef}
@@ -369,7 +436,7 @@ const RandomVariableModule = () => {
                     <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                     <XAxis dataKey="x"/>
                     <YAxis hide/>
-                    <RechartsTooltip/>
+                    <RechartsTooltip {...tooltipConfig}/>
                     <Bar dataKey="p" fill="#8b5cf6" radius={[4,4,0,0]} name="P(X=x)"/>
                     <ReferenceLine x={stats.eX} stroke="#7c3aed" strokeWidth={2} label="μ"/>
                 </BarChart>
@@ -402,10 +469,22 @@ const SimulationModule = () => {
      return history.map((val,i)=>{if(val===targetNum)count++; return {n:i+1,rel:count/(i+1)}}).filter((_,i)=>i%step===0 || i===history.length-1);
   },[history,targetNum]);
 
+  const stats = useMemo(() => {
+    if (!history.length) return { mean: 0, median: 0, rel: 0 };
+    const sorted = [...history].sort((a,b)=>a-b);
+    const mid = Math.floor(sorted.length/2);
+    const median = sorted.length % 2 ? sorted[mid] : (sorted[mid-1] + sorted[mid]) / 2;
+    const mean = history.reduce((s,v)=>s+v,0) / history.length;
+    const rel = data.length ? data[data.length-1].rel : 0;
+    return { mean, median, rel };
+  }, [history, data]);
+
   const simExportMeta = [
     `Zielzahl: ${targetNum}`,
     `Würfe: ${history.length}`,
-    `Aktuelle relative Häufigkeit: ${data.length ? data[data.length-1].rel.toFixed(3) : '–'}`
+    `Aktuelle relative Häufigkeit: ${data.length ? data[data.length-1].rel.toFixed(3) : '–'}`,
+    `Mittelwert: ${history.length ? stats.mean.toFixed(2) : '–'}`,
+    `Median: ${history.length ? stats.median.toFixed(2) : '–'}`
   ].join('\n');
 
   return (
@@ -420,28 +499,31 @@ const SimulationModule = () => {
              <button onClick={()=>{setIsRunning(false);setHistory([])}} className="px-4 py-2 border rounded flex gap-2 items-center"><RotateCcw size={18}/> Reset</button>
              <div className="ml-auto px-4 py-2 bg-slate-100 rounded font-mono text-sm">n = {history.length}</div>
           </div>
-       </Card>
-       <Card title={customTitle || "Konvergenz"} chartRef={chartRef} customTitle={customTitle}>
-          <div className="w-full h-[400px]" ref={chartRef}>
       </Card>
       <Card title={customTitle || "Konvergenz"} chartRef={chartRef} customTitle={customTitle}>
           <div 
-            className="w-full h-[400px]" 
+            className="w-full h-[400px] relative" 
             ref={chartRef}
             data-export-title={customTitle || "Gesetz der großen Zahlen"}
             data-export-meta={simExportMeta}
           >
              {customTitle && <div className="text-center font-bold mb-2">{customTitle}</div>}
+             <div className="absolute top-4 right-4 bg-white/90 backdrop-blur shadow-lg border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-700 space-y-1">
+                <div className="font-bold text-slate-900">Live-Statistik</div>
+                <div className="flex justify-between gap-4"><span>Mittelwert</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.mean) : '–'}</span></div>
+                <div className="flex justify-between gap-4"><span>Median</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.median) : '–'}</span></div>
+                <div className="flex justify-between gap-4"><span>Rel. Häufigkeit ({targetNum})</span><span className="font-semibold text-blue-700">{history.length ? formatNumber(stats.rel) : '–'}</span></div>
+              </div>
              <ResponsiveContainer>
                 <LineChart data={data}>
                     <CartesianGrid strokeDasharray="3 3"/>
                     <XAxis dataKey="n"/>
                     <YAxis domain={[0,0.5]}/>
-                    <RechartsTooltip/>
-                    <Line dot={false} dataKey="rel" stroke="#2563eb" strokeWidth={2} name={`Rel. Häufigkeit (${targetNum})`}/>
+                    <RechartsTooltip {...tooltipConfig}/>
+                    <Line dot={false} isAnimationActive={false} dataKey="rel" stroke="#2563eb" strokeWidth={2} name={`Rel. Häufigkeit (${targetNum})`}/>
                     <ReferenceLine y={1/6} stroke="green" strokeDasharray="5 5" label="1/6"/>
                 </LineChart>
-             </ResponsiveContainer>
+            </ResponsiveContainer>
           </div>
        </Card>
     </div>
@@ -456,7 +538,58 @@ const UrnModule = () => {
   ]);
   const [draws, setDraws] = useState(2);
   const [mode, setMode] = useState('without'); 
-@@ -440,83 +542,93 @@ const UrnModule = () => {
+  const [simResults, setSimResults] = useState<any[] | null>(null);
+  const [customTitle, setCustomTitle] = useState("");
+  const chartRef = useRef(null);
+
+  const runSimulation = () => {
+    const trials = 2000;
+    const results: Record<string, number> = {};
+    for (let i = 0; i < trials; i++) {
+      let currentBalls = balls.map(b => ({...b})); 
+      let path = [];
+      for (let d = 0; d < draws; d++) {
+        const total = currentBalls.reduce((s, b) => s + b.count, 0);
+        if (total === 0) break;
+        let r = Math.random() * total;
+        let selected = null;
+        for (let b of currentBalls) {
+          if (r < b.count) { selected = b; break; }
+          r -= b.count;
+        }
+        if (selected) {
+          path.push(selected.name);
+          if (mode === 'without') selected.count--;
+        }
+      }
+      const key = path.join('-'); 
+      results[key] = (results[key] || 0) + 1;
+    }
+    const chartData = Object.entries(results)
+      .map(([name, count]) => ({ name, count, prob: count/trials }))
+      .sort((a,b) => b.count - a.count);
+    setSimResults(chartData);
+  };
+
+  const renderTree = (depth: number, currentBalls: any[], x: number, y: number, width: number, pSoFar: number): any => {
+    if (depth === 0) {
+        // Render Result Label at leaf node
+        return (
+            <g key={`leaf-${x}-${y}`}>
+                <rect x={x-25} y={y+15} width="50" height="20" fill="#f1f5f9" rx="4" stroke="#e2e8f0"/>
+                <text x={x} y={y+28} textAnchor="middle" fontSize="10" fontWeight="bold" fill="#334155">{pSoFar.toFixed(4)}</text>
+            </g>
+        );
+    }
+    
+    // Check prune condition but ensure we draw if depth is small to avoid empty screens
+    if (pSoFar < 0.001 && depth > 2) return null; 
+
+    const currentTotal = currentBalls.reduce((s, b) => s + b.count, 0);
+    if (currentTotal === 0) return null;
+    const branches: any[] = [];
+    const validBalls = currentBalls.filter(b => b.count > 0);
+    const childWidth = width / validBalls.length;
     let currentX = x - width / 2 + childWidth / 2;
 
     validBalls.forEach((ball) => {
@@ -519,7 +652,6 @@ const UrnModule = () => {
            </div>
         </Card>
         <Card title={customTitle || (useSim ? "Simulation" : "Baumdiagramm")} className="xl:col-span-2 min-h-[500px]" chartRef={chartRef} customTitle={customTitle}>
-           <div className="w-full h-full min-h-[500px]" ref={chartRef}>
            <div 
              className="w-full h-full min-h-[500px]" 
              ref={chartRef}
@@ -531,7 +663,7 @@ const UrnModule = () => {
                <div className="h-full">
                  {simResults ? (
                    <ResponsiveContainer width="100%" height="100%">
-                     <BarChart data={simResults} layout="vertical" margin={{left:50, right:20}}><CartesianGrid strokeDasharray="3 3" horizontal/><XAxis type="number"/><YAxis dataKey="name" type="category" width={100} tick={{fontSize:11}}/><RechartsTooltip/><Bar dataKey="prob" fill="#3b82f6" radius={[0,4,4,0]} name="Rel. Häufigkeit"/></BarChart>
+                     <BarChart data={simResults} layout="vertical" margin={{left:50, right:20}}><CartesianGrid strokeDasharray="3 3" horizontal/><XAxis type="number"/><YAxis dataKey="name" type="category" width={100} tick={{fontSize:11}}/><RechartsTooltip {...tooltipConfig}/><Bar dataKey="prob" fill="#3b82f6" radius={[0,4,4,0]} name="Rel. Häufigkeit"/></BarChart>
                    </ResponsiveContainer>
                  ) : <div className="flex items-center justify-center h-full text-slate-400">Bitte Simulation starten</div>}
                </div>
@@ -551,7 +683,13 @@ const UrnModule = () => {
            </div>
         </Card>
       </div>
-@@ -530,163 +642,199 @@ const HypothesisModule = () => {
+    </div>
+  );
+};
+
+// --- MODULE: HYPOTHESENTEST ---
+const HypothesisModule = () => {
+  const [n, setN] = useState<number | ''>(50);
   const [p0, setP0] = useState<number | ''>(0.4);
   const [kCrit, setKCrit] = useState(25);
   const [type, setType] = useState('right'); 
@@ -621,7 +759,6 @@ const UrnModule = () => {
              </div>
           </Card>
           <Card title={customTitle || "Ablehnungsbereich"} className="lg:col-span-2" chartRef={chartRef} customTitle={customTitle}>
-             <div className="w-full h-[350px]" ref={chartRef}>
              <div 
                className="w-full h-[350px]" 
                ref={chartRef}
@@ -634,11 +771,10 @@ const UrnModule = () => {
                        <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                        <XAxis dataKey="k"/>
                        <YAxis hide/>
-                       <RechartsTooltip/>
+                       <RechartsTooltip {...tooltipConfig}/>
                        <Legend/>
                        <Bar dataKey="prob" name="Wahrscheinlichkeit" shape={(props: any) => {
                           const { x, y, width, height, payload } = props;
-                          return <rect x={x} y={y} width={width} height={height} fill={payload.isReject ? "#ef4444" : "#e2e8f0"} radius={[2,2,0,0]}/>
                           return <rect x={x} y={y} width={width} height={height} fill={payload.isReject ? "#ef4444" : "#e2e8f0"} rx={2} ry={2}/>
                        }}/>
                        <ReferenceLine x={kCrit} stroke="black" strokeDasharray="3 3" label="k"/>
@@ -705,7 +841,6 @@ const VennModule = () => {
         </div>
       </Card>
       <Card title={customTitle || "Venn-Diagramm"} chartRef={chartRef} customTitle={customTitle}>
-        <div className="w-full h-[350px] flex items-center justify-center" ref={chartRef}>
         <div 
           className="w-full h-[350px] flex items-center justify-center" 
           ref={chartRef}
@@ -720,8 +855,6 @@ const VennModule = () => {
               <use href="#cA" fill="#3b82f6" fillOpacity="0.2" stroke="#2563eb" strokeWidth="2" />
               <use href="#cB" fill="#8b5cf6" fillOpacity="0.2" stroke="#7c3aed" strokeWidth="2" />
               <use href="#cB" clipPath="url(#clipA)" fill="#475569" fillOpacity="0.3" />
-              <text x={cAx} y={cy} textAnchor="middle" dy="5" fontSize="14" fontWeight="bold" fill="#1e40af" pointerEvents="none">A</text>
-              <text x={cBx} y={cy} textAnchor="middle" dy="5" fontSize="14" fontWeight="bold" fill="#6b21a8" pointerEvents="none">B</text>
               <text x={cAx} y={cy - 12} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#1e40af" pointerEvents="none">A</text>
               <text x={cBx} y={cy - 12} textAnchor="middle" fontSize="14" fontWeight="bold" fill="#6b21a8" pointerEvents="none">B</text>
               <text x={cAx - geometry.radA * 0.35} y={cy + 12} textAnchor="middle" fontSize="12" fill="#1e3a8a" pointerEvents="none">{`A \\ B: ${onlyA.toFixed(2)}`}</text>
@@ -756,7 +889,11 @@ const App = () => {
   return (
     <div className="flex h-screen bg-slate-50 text-slate-800 font-sans overflow-hidden">
       {menuOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={()=>setMenuOpen(false)}/>}
-@@ -698,26 +846,26 @@ const App = () => {
+      <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 transform transition-transform duration-300 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0`}>
+         <div className="h-16 flex items-center px-6 border-b border-slate-100 font-bold text-xl text-blue-700 gap-2">
+            <Calculator className="text-blue-600"/> Stochastik<span className="font-light text-slate-400">Master</span>
+         </div>
+         <div className="p-4 space-y-1 overflow-y-auto h-[calc(100%-4rem)]">
            {tabs.map(t=>(
              <button key={t.id} onClick={()=>{setActiveTab(t.id);setMenuOpen(false)}} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${activeTab===t.id?'bg-blue-50 text-blue-700 border border-blue-100':'text-slate-600 hover:bg-slate-50 border border-transparent'}`}>
                <t.icon size={18}/> {t.title}
@@ -781,3 +918,5 @@ const App = () => {
     </div>
   );
 };
+
+export default App;
